@@ -686,7 +686,7 @@ function composeView(P,pre){
 }
 const short=it=>({ac1:"冷氣（下）",ac2:"冷氣（上）",washer:"洗衣機",heater:"熱水器",gas:"瓦斯",clothes:"衣服",clips:"夾子",mop:"拖把",sponge:"海綿",jinlu:"金爐",basket:"洗衣籃",stools:"板凳",bike:"腳踏車",person:"人"})[it.id]||(({ac:"冷氣",washer:"洗衣機",heater:"熱水器",gas:"瓦斯",clothes:"衣服",clips:"夾子",mop:"拖把",sponge:"海綿",jinlu:"金爐",basket:"洗衣籃",stools:"板凳",bike:"腳踏車"})[it.key]||it.name)+(it.id.includes("-")?" "+it.id.split("-")[1]:"");
 function elevSVG(ck){
-  const L=st.L,m=30,vw=L+2*m+60,vh=H+m+50, svg=$("elev"); svg.setAttribute("viewBox",`${-m-10} ${-m} ${vw} ${vh}`);
+  const L=st.L,m=30,vw=L+2*m+60+fsE*3,vh=H+m+50, svg=$("elev"); svg.setAttribute("viewBox",`${-m-10} ${-m} ${vw} ${vh}`);
   const Y=z=>H-z, o=[], fs=fsE;
   o.push(`<rect x="-10" y="${Y(H)}" width="10" height="${H}" fill="var(--wall)" stroke="var(--hatch)"/><rect x="${L}" y="${Y(H)}" width="10" height="${H}" fill="var(--wall)" stroke="var(--hatch)"/>`);
   o.push(`<rect x="-10" y="${Y(0)}" width="${L+20}" height="12" fill="var(--wall)" stroke="var(--hatch)"/><line x1="-10" y1="${Y(H)}" x2="${L+10}" y2="${Y(H)}" stroke="var(--hatch)" stroke-width="1.5"/>`);
