@@ -287,7 +287,7 @@ const $=id=>document.getElementById(id);
 const H=300, PH=110, HEAD=180, REACH=35, CELL=5;
 // ---------- item catalogue (cm). fr: clearance {f,b,s,t} relative to the item's front; kind: elec | misc | cloth | ref
 const CAT={
-  ac:{name:"冷氣室外機",kind:"elec",grp:"equip",need:true,w:75,d:30,h:60,mount:"rack",fr:{f:100,b:15,s:60,t:20},zone:"clear",note:"出風口朝前方（預設朝女兒牆外）。下方支撐算在 60 cm 內。"},
+  ac:{name:"冷氣室外機",kind:"elec",grp:"equip",need:true,w:75,d:30,h:60,mount:"rack",fr:{f:100,b:15,s:60,t:20},zone:"clear",note:"出風口朝前方（預設朝女兒牆外）。拖到女兒牆附近會吸到牆頂（離地 110 cm）；疊放時上面那台吸到下面那台頂端再高 20 cm。"},
   washer:{name:"洗衣機（直立式）",kind:"elec",grp:"laundry",need:true,w:55.7,d:60.4,h:131,mount:"floor",note:"高度含開蓋（131 cm），依你的 Rhino 圖。"},
   heater:{name:"熱水器",kind:"elec",grp:"equip",need:true,w:50,d:26,h:87.6,mount:"wall",fr:{f:15,b:0,s:15,t:60},zone:"heat",note:"預設掛在左牆、正面朝右。預留距離內不可有可燃物。"},
   gas:{name:"瓦斯桶",kind:"misc",grp:"equip",need:true,w:30.6,d:30.6,h:87.8,mount:"floor",shape:"cyl"},
@@ -352,7 +352,35 @@ function frontStrip(it,b){ // the face the user stands in front of
 function bikeWallGap(it,b,c=st){ return (it.rot===90||it.rot===270)?Math.min(b.x0,c.L-b.x1):b.y0; }
 function snapBike(it,c=st){ if(it.key!=="bike"||!it.posture||it.posture==="flat") return; const b=fp(it), w=b.x1-b.x0;
   if(it.rot===90||it.rot===270){ if(b.x0<c.L-b.x1) it.x=0; else it.x=c.L-w; } else { it.rot=0; it.y=0; } }
-function enforce(){ for(const it of items){ if(it.key==="heater") snapHeater(it); if(it.key==="washer") turnWasher(it); if(HANG(it.key)) it.z=st.rod-it.h; } }
+// gravity: floor items fall to the floor; small items (burner, basket) may rest on stools or on a closed washer when their centre is over it
+const STACKABLE=new Set(["jinlu","basket"]), SUPPORT=new Set(["stools","washer"]), WASHER_LID=43;
+const topOf=o=>o.key==="washer"?o.z+o.h-WASHER_LID:o.z+o.h;
+function restsOn(it,o){ if(!STACKABLE.has(it.key)||!SUPPORT.has(o.key)) return false; const a=fp(it), b=fp(o), cx=(a.x0+a.x1)/2, cy=(a.y0+a.y1)/2;
+  return Math.abs(it.z-topOf(o))<1&&cx>=b.x0&&cx<=b.x1&&cy>=b.y0&&cy<=b.y1; }
+function gravity(list){
+  const fl=list.filter(i=>i.on!==false&&i.mount==="floor"&&i.key!=="bike");
+  for(const it of fl) if(!STACKABLE.has(it.key)) it.z=0;
+  for(const it of fl) if(STACKABLE.has(it.key)){ const a=fp(it), cx=(a.x0+a.x1)/2, cy=(a.y0+a.y1)/2;
+    const sups=fl.filter(o=>SUPPORT.has(o.key)&&(()=>{const b=fp(o); return cx>=b.x0&&cx<=b.x1&&cy>=b.y0&&cy<=b.y1;})());
+    if(!sups.length){ it.z=0; continue; }
+    const s=sups.reduce((m,o)=>topOf(o)>topOf(m)?o:m), b=fp(s);
+    it.x+=(b.x0+b.x1)/2-cx; it.y+=(b.y0+b.y1)/2-cy; it.z=topOf(s); } }
+// outdoor units: snap onto the parapet top when dragged near it, and onto another unit (+20 cm) when stacked
+const AC_SNAP=30;
+function snapAC(list){
+  const acs=list.filter(i=>i.key==="ac"&&i.on!==false).sort((a,b)=>a.z-b.z);
+  for(const it of acs){ const b=fp(it), lim=maxY(b.x0,st,PH);
+    if(Math.abs(lim-b.y1)>AC_SNAP) continue;
+    it.y=lim-(b.y1-b.y0);
+    const cands=[{z:PH}]; for(const o of acs){ if(o===it) continue; const q=fp(o), ox=Math.min(b.x1,q.x1)-Math.max(b.x0,q.x0);
+      if(ox>=(b.x1-b.x0)/2&&Math.abs(q.y1-lim)<1&&o.z<it.z) cands.push({z:o.z+o.h+20,x:o.x}); }
+    let best=null; for(const c of cands){ const d=Math.abs(it.z-c.z); if(d<=AC_SNAP&&(!best||d<best.d)) best={...c,d}; }
+    if(best){ it.z=best.z; if(best.x!=null) it.x=best.x; } } }
+// gas cylinder ↔ heater: nearest plan distance, edge to edge
+function planGap(a,b){ return Math.hypot(Math.max(0,b.x0-a.x1,a.x0-b.x1),Math.max(0,b.y0-a.y1,a.y0-b.y1)); }
+function gasGaps(list){ const hs=list.filter(i=>i.key==="heater"&&i.on!==false); return list.filter(i=>i.key==="gas"&&i.on!==false).map(g=>hs.length?Math.min(...hs.map(h=>planGap(fp(g),fp(h)))):null); }
+function enforce(){ for(const it of items){ if(it.key==="heater") snapHeater(it); if(it.key==="washer") turnWasher(it); if(HANG(it.key)) it.z=st.rod-it.h; }
+  gravity(items); snapAC(items); }
 function loadPreset(k){
   const p=PRESETS[k]; Object.assign(st,p.bal); st.preset=k;
   items=[]; const keys=[...new Set(BASE.map(b=>b[1]))];
@@ -408,7 +436,7 @@ function check(){
     if(b.y1>maxY(b.x0,st,b.z0)+0.5) push(st.ext&&b.z0<PH-0.5&&b.y1>st.D+0.5?`${it.name} 超出女兒牆 ${Math.round(b.y1-st.D)} cm（白鐵外擴在女兒牆上方，要離地 110 cm 以上才能放進去）`:`${it.name} 超出女兒牆或外擴欄桿 ${Math.round(b.y1-maxY(b.x0,st,b.z0))} cm`,[it.id]);
     if(b.z1>H+0.5) push(`${it.name} 頂到上層樓板`,[it.id]);
     if(b.z0<-0.5) push(`${it.name} 低於地板`,[it.id]);
-    if(it.mount==="floor"&&b.z0>1){const sup=(st.ext&&Math.abs(b.z0-PH)<2&&b.y1>st.D+2)||real.some(o=>o!==it&&Math.abs(B[o.id].z1-b.z0)<2&&Math.min(b.x1,B[o.id].x1)-Math.max(b.x0,B[o.id].x0)>2&&Math.min(b.y1,B[o.id].y1)-Math.max(b.y0,B[o.id].y0)>2);
+    if(it.mount==="floor"&&b.z0>1){const sup=(st.ext&&Math.abs(b.z0-PH)<2&&b.y1>st.D+2)||real.some(o=>o!==it&&Math.abs(topOf(o)-b.z0)<2&&Math.min(b.x1,B[o.id].x1)-Math.max(b.x0,B[o.id].x0)>2&&Math.min(b.y1,B[o.id].y1)-Math.max(b.y0,B[o.id].y0)>2);
       if(!sup) push(`${it.name} 懸空，下面沒有東西撐著`,[it.id],"warn");}
     if(it.key==="washer"){const g=washerGap(it,b); if(g>WASHER_GAP+0.5) push(`${it.name} 的背面要靠牆（現在離牆 ${Math.round(g)} cm，最多 ${WASHER_GAP} cm）`,[it.id]);}
     if(it.key==="heater"){const ok=it.rot===0?b.y0<2:it.rot===90?b.x0<2:it.rot===270?b.x1>st.L-2:false; if(!ok) push(`${it.name} 的背面（接水管那面）要貼牆`,[it.id]);}
@@ -417,6 +445,7 @@ function check(){
   }
   // item vs item
   for(let i=0;i<real.length;i++)for(let j=i+1;j<real.length;j++){const a=real[i],c=real[j];
+    if(restsOn(a,c)||restsOn(c,a)) continue;
     if(ov(B[a.id],B[c.id])) push(`${a.name} 和 ${c.name} 重疊`,[a.id,c.id]);}
   // zones
   for(const it of real){for(const z of zones(it)){
@@ -735,7 +764,7 @@ function panels(ck){
   let foot=0; for(const it of real){const b=fp(it); if(b.z0<HEAD) foot+=(b.x1-b.x0)*(b.y1-b.y0);}
   let walkA=0; if(ck.wk.seed) for(let k=0;k<ck.wk.area.length;k++) walkA+=ck.wk.area[k]?CELL*CELL:0;
   const need=real.filter(i=>i.need).length, needAll=items.filter(i=>i.need).length;
-  $("stats").innerHTML=`<span>曬衣桿高度</span><b>${st.rod} cm</b><span>陽台地板面積</span><b>${(area/1e4).toFixed(2)} m²</b><span>物品佔地（投影）</span><b>${(foot/1e4).toFixed(2)} m²</b><span>走得到的範圍</span><b>${(walkA/1e4).toFixed(2)} m²</b><span>放進的必要物品</span><b>${need} / ${needAll}</b><span>放進的選用物品</span><b>${real.length-need} / ${items.filter(i=>!i.need&&i.kind!=="ref").length}</b>`;
+  const gg=gasGaps(items); $("stats").innerHTML=`<span>曬衣桿高度</span><b>${st.rod} cm</b>${gg.length?`<span>瓦斯桶 ↔ 熱水器（平面最近距離）</span><b>${gg.map(v=>v==null?"—":Math.round(v)+" cm").join("、")}</b>`:""}<span>陽台地板面積</span><b>${(area/1e4).toFixed(2)} m²</b><span>物品佔地（投影）</span><b>${(foot/1e4).toFixed(2)} m²</b><span>走得到的範圍</span><b>${(walkA/1e4).toFixed(2)} m²</b><span>放進的必要物品</span><b>${need} / ${needAll}</b><span>放進的選用物品</span><b>${real.length-need} / ${items.filter(i=>!i.need&&i.kind!=="ref").length}</b>`;
   // item list
   $("items").innerHTML=items.filter(i=>i.kind!=="ref").map(it=>{const st2=!it.on?"off":ck.bad.has(it.id)?"bad":"";
     return `<div class="irow${st.sel===it.id?" sel":""}" data-id="${it.id}"><input type="checkbox" aria-label="放入${it.name}" ${it.on?"checked":""} data-chk="${it.id}"><span><i class="chip" style="background:var(--g-${it.grp}-fill);border-color:var(--g-${it.grp})"></i>${it.name} <span class="tag">${it.need?"必要":"選用"}</span></span>${items.find(o=>o.key===it.key)===it?`<span class="cnt" title="數量"><button type="button" data-dec="${it.key}" aria-label="${CAT[it.key].name}減少一個">−</button><b>${items.filter(o=>o.key===it.key).length}</b><button type="button" data-inc="${it.key}" aria-label="${CAT[it.key].name}增加一個">＋</button></span>`:"<span></span>"}<span class="dot ${st2}" title="${st2==="bad"?"有衝突":st2==="off"?"未放入":"沒問題"}"></span></div>`;}).join("");
@@ -825,13 +854,14 @@ function normalize(S,c){ // enforce structural rules on a candidate
     if(it.key==="bike"){const P=POSTURE[it.posture]; it.w=P.w;it.d=P.d;it.h=P.h;it.z=P.z;it.mount=it.posture==="hang"?"wall":"floor"; snapBike(it,c);}
   }
   // outdoor units: in pairs, the second one stacked on the first
-  const acZ=a=>(c.ext&&a.x>=c.XS-0.5)?PH:106, acs=S.filter(i=>i.key==="ac");
+  const acZ=a=>PH, acs=S.filter(i=>i.key==="ac");
   for(let i=0;i<acs.length;i+=2){ const lo=acs[i], up=acs[i+1]; lo.z=acZ(lo); if(up){ if(SOL.stack){up.x=lo.x;up.y=lo.y;up.z=lo.z+lo.h+20;} else up.z=acZ(up); } }
   // burners: the i-th may sit on the i-th stool stack
   const jns=S.filter(i=>i.key==="jinlu"), sts=S.filter(i=>i.key==="stools");
   jns.forEach((jn,i)=>{const stl=sts[i]; if(jn.onSt&&stl){const b=fp(stl); jn.x=b.x0+(b.x1-b.x0)/2-jn.w/2; jn.y=b.y0+(b.y1-b.y0)/2-jn.d/2; jn.z=stl.h;} else jn.z=0;});
   // drying rod: one height for all clothes and clips
   const hs=S.filter(i=>HANG(i.key)); if(hs.length){ const rod=SOL.rodFree?Math.max(RODMIN,Math.min(RODMAX,Math.round(hs[0].z+hs[0].h))):st.rod; for(const h of hs) h.z=rod-h.h; }
+  gravity(S);
   for(const it of S){ // keep inside the room where the rule allows
     const b=fp(it),fw=b.x1-b.x0,fd=b.y1-b.y0;
     it.x=Math.max(0,Math.min(c.L-fw,it.x)); it.y=Math.max(0,Math.min(maxY(it.x,c,it.z)-fd,it.y));
@@ -845,7 +875,8 @@ function energy(S,c,full){
     if(it.mount==="wall"||(it.posture&&it.posture!=="flat")){const dw=Math.min(b.x0,c.L-b.x1,b.y0); if(dw>1) E+=dw*60+200;}
     if(dq&&b.z0<210&&rectHitsQuad(b,dq)) E+=800;
     for(let j=i+1;j<n;j++){const o=B[j]; const ox=Math.min(b.x1,o.x1)-Math.max(b.x0,o.x0),oy=Math.min(b.y1,o.y1)-Math.max(b.y0,o.y0),oz=Math.min(b.z1,o.z1)-Math.max(b.z0,o.z0);
-      if(ox>0.5&&oy>0.5&&oz>0.5) E+=ox*oy+300;}
+      if(ox>0.5&&oy>0.5&&oz>0.5&&!restsOn(it,S[j])&&!restsOn(S[j],it)) E+=ox*oy+300;}
+    if(it.key==="gas"){ const hs=S.filter(o=>o.key==="heater"); if(hs.length){ const d=Math.min(...hs.map(h=>planGap(b,fp(h)))); if(d>200) E+=(d-200)*20+300; } }
     for(const z of zones(it)){
       const out=Math.max(0,-z.x0)+Math.max(0,z.x1-c.L)+(z.role!=="side"?Math.max(0,-z.y0):0); if(out>0.5) E+=out*80+300;
       for(let j=0;j<n;j++){ if(j===i) continue; const o=S[j];
@@ -930,9 +961,17 @@ async function solveDepth(D,base,report){
     r=await anneal(base,depthCtx(L,D),20000,4,tick,{S:bestS,L:bestL});
     if(r.E===0){bestL=L;bestS=r.best;miss=0;} else miss++;
   }
-  if(bestS) bestS=lowerRod(bestS,depthCtx(bestL,D));
+  if(bestS){ const cc=depthCtx(bestL,D); bestS=gasCloser(lowerRod(bestS,cc),cc); }
   return {D,L:bestL,S:bestS,cage:SOL.cage&&D>80,rod:bestS?rodOf(bestS):null};
 }
+// after a layout works: move each gas cylinder as close to its heater as the layout still allows
+function gasCloser(S,c){ let cur=clone(S);
+  for(const g0 of cur.filter(i=>i.key==="gas")){ const hs=cur.filter(i=>i.key==="heater"); if(!hs.length) continue;
+    const gi=cur.findIndex(i=>i.id===g0.id), h=hs.reduce((m,o)=>planGap(fp(g0),fp(o))<planGap(fp(g0),fp(m))?o:m), hb=fp(h), now=planGap(fp(g0),hb);
+    const cand=[]; for(let x=Math.max(0,hb.x0-120);x<=Math.min(c.L-g0.w,hb.x1+120);x+=10) for(let y=0;y<=c.D-g0.d;y+=10){ const d=planGap({x0:x,x1:x+g0.w,y0:y,y1:y+g0.d},hb); if(d<now-5) cand.push([d,x,y]); }
+    cand.sort((a,b)=>a[0]-b[0]);
+    for(const [,x,y] of cand.slice(0,160)){ const T=clone(cur); T[gi].x=x; T[gi].y=y; normalize(T,c); if(energy(T,c,true)===0){ cur=T; break; } } }
+  return cur; }
 function rodOf(S){const h=S.find(i=>HANG(i.key)); return h?Math.round(h.z+h.h):st.rod;}
 function lowerRod(S,c){ if(!SOL.rodFree||!S.some(i=>HANG(i.key))) return S;
   let cur=clone(S); for(let rod=rodOf(S)-5; rod>=RODMIN; rod-=5){ const T=clone(cur); for(const it of T) if(HANG(it.key)) it.z=rod-it.h;
@@ -953,7 +992,7 @@ async function planPreset(k){
     if(!best||r.E<best.E) best={S:r.best,E:r.E};
     if(best.E===0) break;
   }
-  if(best.E===0) best.S=lowerRod(best.S,c);
+  if(best.E===0) best.S=gasCloser(lowerRod(best.S,c),c);
   if(best.S.some(i=>HANG(i.key))) st.rod=rodOf(best.S);
   const m=Object.fromEntries(best.S.map(i=>[i.id,i]));
   items=items.map(it=>m[it.id]?{...m[it.id],on:true}:it);
