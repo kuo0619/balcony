@@ -294,7 +294,7 @@ const H=300, PH=110, HEAD=180, REACH=35, CELL=5;
 // ---------- item catalogue (cm). fr: clearance {f,b,s,t} relative to the item's front; kind: elec | misc | cloth | ref
 const CAT={
   ac:{name:"冷氣室外機",kind:"elec",grp:"equip",need:true,w:75,d:30,h:60,mount:"rack",fr:{f:100,b:15,s:60,t:20},zone:"clear",note:"出風口朝前方（預設朝女兒牆外）。拖到離女兒牆 20 cm 內會吸到牆頂（離地 110 cm）；疊放時上面那台吸到下面那台頂端再高 20 cm。"},
-  washer:{name:"洗衣機（直立式）",kind:"elec",grp:"laundry",need:true,w:55.7,d:60.4,h:131,mount:"floor",fr:{f:0,b:30,s:0,t:0},zone:"clear",note:"高度含開蓋（131 cm），依你的 Rhino 圖。"},
+  washer:{name:"洗衣機（直立式）",kind:"elec",grp:"laundry",need:true,w:55.7,d:60.4,h:131,mount:"floor",fr:{f:0,b:10,s:0,t:0},zone:"clear",note:"高度含開蓋（131 cm），依你的 Rhino 圖。"},
   heater:{name:"熱水器",kind:"elec",grp:"equip",need:true,w:50,d:26,h:87.6,mount:"wall",fr:{f:15,b:0,s:15,t:60},zone:"heat",note:"預設掛在左牆、正面朝右。預留距離內不可有可燃物。"},
   gas:{name:"瓦斯桶",kind:"misc",grp:"equip",need:true,w:30.6,d:30.6,h:87.8,mount:"floor",shape:"cyl"},
   clothes:{name:"衣架（約 15 支）",kind:"cloth",grp:"laundry",need:true,w:142,d:56,h:80,mount:"hang",note:"每週洗兩次估算；頂端掛在曬衣桿上（高度在上方「曬衣桿高度」調整）。"},
@@ -348,7 +348,7 @@ function snapHeater(it,L=st.L){ const b=fp(it), cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)
   else if(m===cx){ it.rot=90; it.x=0; it.y=Math.max(0,cy-it.w/2); }
   else { it.rot=270; it.x=L-it.d; it.y=Math.max(0,cy-it.w/2); } }
 // washer: turn so its back faces the nearest wall (left, right, house wall or parapet); rotate about its centre
-const WASHER_BACK=30, WASHER_GAP=45;
+const WASHER_BACK=10, WASHER_GAP=45;
 function washerWall(it,c=st){ const b=fp(it), cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2, d={90:cx,270:c.L-cx,0:cy};   // never against the parapet
   return +Object.keys(d).reduce((a,k)=>d[k]<d[a]?k:a); }
 function turnWasher(it,c=st){ const b=fp(it), cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2, r=washerWall(it,c); if(r===it.rot) return;
@@ -390,7 +390,7 @@ function planGap(a,b){ return Math.hypot(Math.max(0,b.x0-a.x1,a.x0-b.x1),Math.ma
 function gasGaps(list){ const hs=list.filter(i=>i.key==="heater"&&i.on!==false); return list.filter(i=>i.key==="gas"&&i.on!==false).map(g=>hs.length?Math.min(...hs.map(h=>planGap(fp(g),fp(h)))):null); }
 // ---------- hover information
 const FACE={0:"朝女兒牆（室外）",90:"朝右",180:"朝室內",270:"朝左"};
-const ZTXT={ac:"背面 15、左右各 60、上方 20、出風口前 100 cm",heater:"上方 60、側面 15、前方 15 cm（不可有可燃物）",washer:"背面離牆 30 cm（建議）"};
+const ZTXT={ac:"背面 15、左右各 60、上方 20、出風口前 100 cm",heater:"上方 60、側面 15、前方 15 cm（不可有可燃物）",washer:"背面離牆 10 cm（建議）"};
 function itemInfo(it,full){ const b=fp(it), r=v=>Math.round(v*10)/10;
   let h=`<b>${it.name}</b>${it.on?"":`　<span class="k">（未放入）</span>`}<br><span class="k">尺寸</span> <span class="n">${r(it.w)} × ${r(it.d)} × ${r(it.h)} cm</span>`;
   if(it.key==="bike"&&it.posture) h+=`<br><span class="k">停放</span> ${POSTURE[it.posture].n}`;
@@ -889,7 +889,7 @@ function normalize(S,c){ // enforce structural rules on a candidate
   for(const it of S){
     if(it.key==="ac"){it.rot=0; const cage=c.ext&&it.x>=c.XS-0.5; it.y=(cage?c.D+c.E:c.D)-it.d; }
     if(it.key==="heater"){it.z=135; if(it.wall==="left"){it.rot=90;it.x=0;} else if(it.wall==="right"){it.rot=270;it.x=c.L-it.d;} else {it.rot=0;it.y=0;}}
-    if(it.key==="washer"){ turnWasher(it,c); const b=fp(it); if(it.rot===90) it.x=WASHER_BACK; else if(it.rot===270) it.x=c.L-(b.x1-b.x0)-WASHER_BACK; else it.y=WASHER_BACK; }  // back 30 cm off its wall
+    if(it.key==="washer"){ turnWasher(it,c); const b=fp(it); if(it.rot===90) it.x=WASHER_BACK; else if(it.rot===270) it.x=c.L-(b.x1-b.x0)-WASHER_BACK; else it.y=WASHER_BACK; }  // back 10 cm off its wall
     if(it.key==="bike"){const P=POSTURE[it.posture]; it.w=P.w;it.d=P.d;it.h=P.h;it.z=P.z;it.mount=it.posture==="hang"?"wall":"floor"; snapBike(it,c);}
   }
   // outdoor units: in pairs, the second one stacked on the first
