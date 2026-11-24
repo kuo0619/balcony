@@ -1113,10 +1113,12 @@ function showRes(){
 $("solRes").addEventListener("click",e=>{const b=e.target.closest("button[data-i]"); if(!b) return; const r=SOL.res[+b.dataset.i];
   applyLayout(r.D,r.L,r.S,r.rod,r.cage);});
 for(const [id,key] of [["solStack","stack"],["solBike","bike"],["solJin","jin"]]) $(id).addEventListener("click",e=>{const b=e.target.closest("button"); if(!b) return; SOL[key]=b.dataset.v==="on"; $(id).querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
-const setSolD=v=>{SOL.D=+v; $("solD").value=v; $("vSolD").textContent=v+" cm";};
+const syncDepth=()=>{ if(SOL.running) return; const v=SOL.D; // 拉桿一動，平面圖的陽台深度就跟著變
+  if(SOL.cage&&v>80){ st.D=80; st.ext=true; st.E=v-80; st.XS=0; } else { st.D=v; st.ext=false; } draw(); };
+const setSolD=v=>{SOL.D=+v; $("solD").value=v; $("vSolD").textContent=v+" cm"; syncDepth();};
 $("solD").addEventListener("input",e=>setSolD(e.target.value));
 $("solRod").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b) return; SOL.rodFree=b.dataset.v==="free"; $("solRod").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
-$("solCage").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b) return; SOL.cage=b.dataset.v==="cage"; $("solCage").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
+$("solCage").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b) return; SOL.cage=b.dataset.v==="cage"; syncDepth(); $("solCage").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
 document.querySelector(".ticks").addEventListener("click",e=>{const b=e.target.closest("button[data-v]"); if(b) setSolD(b.dataset.v);});
 $("solGo").addEventListener("click",runSolver);
 $("cutX").addEventListener("input",e=>{st.cutX=+e.target.value; draw();});
