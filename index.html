@@ -226,6 +226,7 @@ svg.dw .rotbtn:hover .hd{fill:var(--accent)}
     <div class="ctl row"><span>腳踏車直立／斜靠／懸吊（需掛鉤）</span><div class="seg" id="solBike"><button type="button" data-v="on" aria-pressed="true">允許</button><button type="button" data-v="off">只能平放</button></div></div>
     <div class="ctl row"><span>金爐放在板凳上</span><div class="seg" id="solJin"><button type="button" data-v="on" aria-pressed="true">允許</button><button type="button" data-v="off">不行</button></div></div>
     <button type="button" class="btn" id="solGo" style="padding:6px 10px;font-weight:500">開始計算</button>
+    <button type="button" class="btn" id="solSkip" style="padding:6px 10px;display:none">跳過動畫</button>
     <p class="note" id="solMsg" aria-live="polite"></p>
     <div id="solRes"></div>
   </section>
@@ -1074,10 +1075,31 @@ async function runSolver(){
   const depths=[SOL.D];
   const msg=t=>{$("solMsg").textContent=t;};
   for(const D of depths){ let r=await solveDepth(D,base,msg);
+    if(r.L&&r.pre&&!r.cage) await playSolve(r,D,msg);
     if(r.L&&!r.pre){ const r2=await solveDepth(D,base,t=>msg(t+"（第二輪）")); if(r2.L&&r2.L<r.L) r=r2; }
     SOL.res=SOL.res.filter(x=>!(x.D===r.D&&!!x.cage===!!r.cage)); SOL.res.push(r); SOL.res.sort((a,b)=>a.D-b.D); showRes(); }
-  msg(`完成。結果是程式搜尋到的最短長度，可能還有更短的排法；點「看配置」可在上方圖中檢查與微調。`);
+  msg(`完成。結果是程式搜尋到的最短長度（參考預先算好的配置並已重新驗證），可能還有更短的排法；點「看配置」可在上方圖中檢查與微調。`);
   SOL.running=false; $("solGo").disabled=false;
+}
+// 預存結果時，用動畫把「電腦逐步試排、長度一路縮短」演出來（每一格都是真的重新排好再畫）
+function applyLayout(D,L,S,rod,cage){
+  if(rod) st.rod=rod; st.L=L; if(cage){st.D=80; st.ext=true; st.E=D-80; st.XS=0;} else {st.D=D; st.ext=false;} st.DX=Math.min(st.DX,Math.max(0,L-st.DW)); st.preset=null;
+  const m=Object.fromEntries(S.map(i=>[i.id,i]));
+  items=items.map(it=>m[it.id]?{...m[it.id]}:{...it,on:it.kind==="ref"?it.on:false});
+  const p=items.find(i=>i.id==="person"); if(p){p.x=st.DX; p.y=0;}
+  draw();
+}
+async function playSolve(r,D,msg){
+  const sleep=ms=>new Promise(x=>setTimeout(x,ms)), sk=$("solSkip"); let skip=false; sk.style.display=""; sk.onclick=()=>{skip=true;};
+  const steps=[]; for(let L=Math.max(r.L+250,500);L>=r.L;L-=5) steps.push(L);
+  const dt=Math.min(110,3200/steps.length);
+  for(const L of steps){ if(skip) break;
+    msg(`深度 ${D} cm：試排 ${L} cm …`);
+    if(L===r.L) applyLayout(D,L,r.S,r.rod,false);
+    else { const c=depthCtx(L,D), S=clone(r.S), k=L/r.L; for(const it of S){ const b=fp(it),w=b.x1-b.x0; it.x=(it.x+w/2)*k-w/2; } normalize(S,c); applyLayout(D,L,S,r.rod,false); }
+    await sleep(dt); }
+  for(const L of [r.L-5,r.L-10]){ if(skip) break; msg(`深度 ${D} cm：試排 ${L} cm … 放不下`); await sleep(350); }
+  applyLayout(D,r.L,r.S,r.rod,false); sk.style.display="none";
 }
 function showRes(){
   if(!SOL.res.length){$("solRes").innerHTML="";return;}
@@ -1085,11 +1107,7 @@ function showRes(){
     SOL.res.map((r,i)=>`<tr><td class="n">${r.D} cm${r.cage?"<br><small>80＋外擴 "+(r.D-80)+"</small>":""}</td><td class="n">${r.L?r.L+" cm":"10 m 內放不下"}</td><td class="n">${r.L?(r.L*(r.cage?80:r.D)/1e4).toFixed(2)+" m²":"—"}</td><td class="n">${r.L&&r.rod?r.rod+" cm":"—"}</td><td>${r.L?`<button type="button" data-i="${i}">看配置</button>`:""}</td></tr>`).join("")+`</tbody></table>`;
 }
 $("solRes").addEventListener("click",e=>{const b=e.target.closest("button[data-i]"); if(!b) return; const r=SOL.res[+b.dataset.i];
-  if(r.rod) st.rod=r.rod; st.L=r.L; if(r.cage){st.D=80; st.ext=true; st.E=r.D-80; st.XS=0;} else {st.D=r.D; st.ext=false;} st.DX=Math.min(st.DX,Math.max(0,r.L-st.DW)); st.preset=null;
-  const m=Object.fromEntries(r.S.map(i=>[i.id,i]));
-  items=items.map(it=>m[it.id]?{...m[it.id]}:{...it,on:it.kind==="ref"?it.on:false});
-  const p=items.find(i=>i.id==="person"); if(p){p.x=st.DX; p.y=0;}
-  draw();});
+  applyLayout(r.D,r.L,r.S,r.rod,r.cage);});
 for(const [id,key] of [["solStack","stack"],["solBike","bike"],["solJin","jin"]]) $(id).addEventListener("click",e=>{const b=e.target.closest("button"); if(!b) return; SOL[key]=b.dataset.v==="on"; $(id).querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
 const setSolD=v=>{SOL.D=+v; $("solD").value=v; $("vSolD").textContent=v+" cm";};
 $("solD").addEventListener("input",e=>setSolD(e.target.value));
