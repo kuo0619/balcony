@@ -473,6 +473,7 @@ function check(){
       if(!sup) push(`${it.name} 懸空，下面沒有東西撐著`,[it.id],"warn");}
     if(it.key==="washer"){const g=washerGap(it,b); if(g>WASHER_GAP+0.5) push(`${it.name} 的背面要靠牆（現在離牆 ${Math.round(g)} cm；建議留 ${WASHER_BACK} cm，最多 ${WASHER_GAP} cm）`,[it.id]);}
     if(it.key==="heater"){const ok=it.rot===0?b.y0<2:it.rot===90?b.x0<2:it.rot===270?b.x1>st.L-2:false; if(!ok) push(`${it.name} 的背面（接水管那面）要貼牆`,[it.id]);}
+    if(it.key==="bike"&&it.posture==="hang"&&it.z+it.h>HANGTOP+0.5) push(`${it.name} 懸吊太高（上緣 ${Math.round(it.z+it.h)} cm）：不可超過 ${HANGTOP} cm`,[it.id]);
     if(it.key==="bike"&&it.posture!=="hang"&&it.z>1&&it.id!==DRAGGING) push(`${it.name} 懸在半空（離地 ${Math.round(it.z)} cm）：輪子一定要著地`,[it.id]);
     if(it.key==="bike"&&it.posture&&it.posture!=="flat"){const g=bikeWallGap(it,b); if(g>2) push(`${it.name}（${POSTURE[it.posture].n}）沒有靠到牆，離牆 ${Math.round(g)} cm：要整台靠在牆上才放得穩`,[it.id]);}
     else if(it.mount==="wall"){const touch=b.x0<2||b.x1>st.L-2||b.y0<2; if(!touch) push(`${it.name} 沒有靠在牆上`,[it.id],"warn");}
@@ -809,7 +810,7 @@ function panels(ck){
   $("editor").hidden=!it; $("postRow").hidden=!(it&&it.posture); if(it&&it.posture) $("postsw").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===it.posture));
   if(it){$("edName").textContent=it.name; const ae=document.activeElement;
     for(const [k,f] of [["ew","w"],["ed","d"],["eh","h"],["ex","x"],["ey","y"],["ez","z"]]) if(ae!==$(k)) $(k).value=f1(it[f]);
-    $("edNote").textContent=(it.note||"")+(it.key==="bike"&&it.posture==="hang"?" 懸吊：側面貼牆、掛在牆上的掛鉤上，使用前要先裝好掛鉤；可在立面上下拖曳調整高度。":it.mount==="hang"?" 懸吊物品可在立面調整高度。":it.mount==="wall"?" 掛牆物品需貼著牆。":"");}
+    $("edNote").textContent=(it.note||"")+(it.key==="bike"&&it.posture==="hang"?" 懸吊：側面貼牆、掛在牆上的掛鉤上，使用前要先裝好掛鉤；上緣不可超過 230 cm；可在立面上下拖曳調整高度。":it.mount==="hang"?" 懸吊物品可在立面調整高度。":it.mount==="wall"?" 掛牆物品需貼著牆。":"");}
 }
 // ---------- controls
 function segs(){
@@ -872,8 +873,8 @@ function dragOn(svg,mode){
     if(mode==="plan"){let ny=drag.y+(p.y-drag.p0.y); const my=maxY(it.x,st,it.z); ny=snap(ny,[0,my-d,st.D-d]); it.y=Math.max(-20,Math.min(my+40,ny));}
     else if(mode==="side"){ /* handled below */ }
     if(mode==="side"){ it.x=drag.x; let ny=drag.y+(st.cutDir<0?-1:1)*(p.x-drag.p0.x); const my=maxY(it.x,st,it.z); ny=snap(ny,[0,my-d,st.D-d]); it.y=Math.max(-20,Math.min(my+40,ny));
-      let nz=drag.z-(p.y-drag.p0.y); const tops=items.filter(o=>o!==it&&o.on).map(o=>fp(o).z1); nz=snap(nz,[0,PH,...tops]); it.z=Math.max(0,Math.min(H-it.h+20,nz)); }
-    else if(mode==="elev"){let nz=drag.z-(p.y-drag.p0.y); const tops=items.filter(o=>o!==it&&o.on).map(o=>fp(o).z1); nz=snap(nz,[0,PH,...tops]); it.z=Math.max(0,Math.min(H-it.h+20,nz));}
+      let nz=drag.z-(p.y-drag.p0.y); const tops=items.filter(o=>o!==it&&o.on).map(o=>fp(o).z1); nz=snap(nz,[0,PH,...tops]); it.z=Math.max(0,Math.min(it.key==="bike"&&it.posture==="hang"?HANGTOP-it.h:H-it.h+20,nz)); }
+    else if(mode==="elev"){let nz=drag.z-(p.y-drag.p0.y); const tops=items.filter(o=>o!==it&&o.on).map(o=>fp(o).z1); nz=snap(nz,[0,PH,...tops]); it.z=Math.max(0,Math.min(it.key==="bike"&&it.posture==="hang"?HANGTOP-it.h:H-it.h+20,nz));}
     if(HANG(it.key)&&mode!=="plan") st.rod=Math.round(it.z+it.h);
     st.preset=null; draw();});
   const end=()=>{ if(drag&&drag.it){ DRAGGING=null; draw(); } drag=null; };
@@ -891,6 +892,7 @@ document.addEventListener("pointerdown",e=>{ if(tipPinned&&!e.target.closest("#t
 
 // ---------- solver: fixed depth, shortest length (simulated annealing + binary search)
 const SOL={D:136,cage:false,rodFree:false,stack:true,bike:true,jin:true,running:false,res:[]};
+const HANGTOP=230;   // 懸吊腳踏車的上緣不可超過 230 cm
 const POSTS=["flat","upright","lean","hang"];
 function depthCtx(L,D){ return SOL.cage&&D>80?solCtx(L,80,{ext:true,E:D-80,XS:0}):solCtx(L,D); }
 function solCtx(L,D,ex){return {L,D,ext:!!(ex&&ex.ext),E:ex&&ex.ext?ex.E:0,XS:ex&&ex.ext?ex.XS:0,door:st.door,hinge:st.hinge,DW:st.DW,DX:Math.min(st.DX,Math.max(0,L-st.DW)),W:st.W};}
@@ -900,7 +902,7 @@ function normalize(S,c){ // enforce structural rules on a candidate
     if(it.key==="ac"){it.rot=0; const cage=c.ext&&it.x>=c.XS-0.5; it.y=(cage?c.D+c.E:c.D)-it.d; }
     if(it.key==="heater"){it.z=135; if(it.wall==="left"){it.rot=90;it.x=0;} else if(it.wall==="right"){it.rot=270;it.x=c.L-it.d;} else {it.rot=0;it.y=0;}}
     if(it.key==="washer"){ turnWasher(it,c); const b=fp(it); if(it.rot===90) it.x=WASHER_BACK; else if(it.rot===270) it.x=c.L-(b.x1-b.x0)-WASHER_BACK; else it.y=WASHER_BACK; }  // back 10 cm off its wall
-    if(it.key==="bike"){const P=POSTURE[it.posture]; it.w=P.w;it.d=P.d;it.h=P.h;it.z=(it.posture==="hang"&&it.z>=P.z&&it.z<=H-P.h)?it.z:P.z;it.mount=it.posture==="hang"?"wall":"floor"; snapBike(it,c);}
+    if(it.key==="bike"){const P=POSTURE[it.posture]; it.w=P.w;it.d=P.d;it.h=P.h;it.z=(it.posture==="hang"&&it.z>=P.z&&it.z<=HANGTOP-P.h)?it.z:P.z;it.mount=it.posture==="hang"?"wall":"floor"; snapBike(it,c);}
   }
   // outdoor units: in pairs, the second one stacked on the first
   const acZ=a=>PH, acs=S.filter(i=>i.key==="ac");
@@ -966,7 +968,7 @@ function mutate(S,c,sig){
   else if(r<.82){ if(it.key!=="ac"&&it.key!=="heater") it.rot=it.rot?0:90; }
   else if(r<.9){ if(it.key==="bike"&&SOL.bike) it.posture=POSTS[Math.random()*4|0]; else if(it.key==="heater") it.wall=["left","right","house"][Math.random()*3|0]; else if(it.key==="jinlu"&&SOL.jin) it.onSt=!it.onSt; else {it.x+=gauss()*sig;} }
   else { const o=S[Math.random()*S.length|0]; const t=it.x; it.x=o.x; o.x=t; }
-  if(it.key==="bike"&&it.posture==="hang"&&Math.random()<.4) it.z=rnd(POSTURE.hang.z,Math.max(POSTURE.hang.z,H-it.h));   // 懸吊的高度也一起找
+  if(it.key==="bike"&&it.posture==="hang"&&Math.random()<.4) it.z=rnd(POSTURE.hang.z,Math.max(POSTURE.hang.z,HANGTOP-it.h));   // 懸吊的高度也一起找
   if(SOL.rodFree&&HANG(it.key)&&Math.random()<.35){ const rod=Math.max(RODMIN,Math.min(RODMAX,it.z+it.h+gauss()*20)); for(const o of S) if(HANG(o.key)) o.z=rod-o.h; }
   // walls snap: pull to nearest wall sometimes
   if(Math.random()<.15){ const b=fp(it); if(b.y0<15) it.y=0; if(b.x0<15) it.x=0; if(c.L-b.x1<15) it.x=c.L-(b.x1-b.x0);}
