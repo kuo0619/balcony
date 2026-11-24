@@ -997,7 +997,7 @@ const PRE={"meta":{"door":"swing","hinge":"left","DW":80,"DX":77,"W":60,"rod":21
 function preFor(base,D){
   const ids=base.map(i=>i.id), key=ids.slice().sort().join(); let set=PRE.sets.find(x=>x.ids===key), sim=false;
   if(!set){ let bn=0; for(const x of PRE.sets){ const xs=new Set(x.ids.split(",")); const n=ids.filter(i=>xs.has(i)).length; if(n>bn){bn=n;set=x;} }
-    if(!set||bn<ids.length*0.6) return null; sim=true; }   // 物品組合不同：用最像的預存結果當起點
+    if(!set||bn<Math.max(3,ids.length*0.3)) return null; sim=true; }   // 物品組合不同：用最像的預存結果當起點
   let bd=null; for(const k of Object.keys(set.t)){ if(bd===null||Math.abs(+k-D)<Math.abs(bd-D)) bd=+k; }
   const e=set.t[bd], m=PRE.meta;
   const S=base.map(b=>Object.assign(clone([b])[0],e.S.find(x=>x.id===b.id)||{}));
@@ -1005,6 +1005,7 @@ function preFor(base,D){
   return {D:bd,L:e.L,S,exact,sim};
 }
 async function solveDepth(D,base,report,noPre){
+  let tries=0; const rp0=report; report=()=>rp0(`深度 ${D} cm：電腦正在搜尋排法…（已試 ${++tries} 種長度）`);
   const tick=()=>new Promise(r=>setTimeout(r,0));
   const floorD=SOL.cage?Math.min(D,80):D; const acIx=base.filter(i=>i.key==="ac").map(i=>i.id); const area=base.reduce((a,it)=>{const b=fp(it); const skip=(it.key==="ac"&&acIx.indexOf(it.id)%2===1)||it.key==="jinlu"||HANG(it.key); return a+(b.z0<HEAD&&!skip?(b.x1-b.x0)*(b.y1-b.y0):0);},0);
   let lo=Math.max(st.DW+20,Math.floor(area/floorD/10)*10), hi=1000, bestL=null, bestS=null;
@@ -1035,7 +1036,7 @@ async function solveDepth(D,base,report,noPre){
     if(r.E===0){bestL=L;bestS=r.best;miss=0;} else miss++;
   }
   if(bestS){ const cc=depthCtx(bestL,D); bestS=gasCloser(lowerRod(bestS,cc),cc); }
-  return {D,L:bestL,S:bestS,cage:SOL.cage&&D>80,rod:bestS?rodOf(bestS):null,pre:usedPre&&!(pre&&pre.sim),warm:usedPre};
+  return {D,L:bestL,S:bestS,cage:SOL.cage&&D>80,rod:bestS?rodOf(bestS):null,pre:usedPre&&!(pre&&pre.sim),warm:!!bestL};
 }
 // after a layout works: move each gas cylinder as close to its heater as the layout still allows
 function gasCloser(S,c){ let cur=clone(S);
@@ -1087,14 +1088,14 @@ function getPool(){ if(SOL.pool!==undefined) return SOL.pool;
 function solveParallel(D,base,msg,cage){
   const pool=getPool(); if(!pool) return Promise.resolve(null);
   const snap=JSON.parse(JSON.stringify(st)), sol={cage:SOL.cage,rodFree:SOL.rodFree,stack:SOL.stack,bike:SOL.bike,jin:SOL.jin};
-  return new Promise(resolve=>{ const res=[]; let left=pool.length, failed=0, over=false;
+  return new Promise(resolve=>{ const res=[]; let left=pool.length, failed=0, over=false, nt=0;
     const fin=()=>{ if(--left>0||over) return; over=true; clearTimeout(wd); const ok=res.filter(Boolean);
       if(!ok.length) return resolve(failed===pool.length?null:{D,L:null});
-      const w=ok.filter(r=>r.L); resolve(w.length?w.reduce((a,b)=>b.L<a.L?b:a):{D,L:null}); };
+      const w=ok.filter(r=>r.L); resolve(w.length?{...w.reduce((a,b)=>b.L<a.L?b:a),warm:true}:{D,L:null}); };
     const wd=setTimeout(()=>{ if(over) return; over=true; SOL.pool=undefined; pool.forEach(w=>w.terminate()); resolve(null); },240000);
     pool.forEach((w,i)=>{
       w.onmessage=e=>{ const m=e.data; if(over) return;
-        if(m.frame){ msg(`深度 ${D} cm：試排 ${m.L} cm …`); applyLayout(D,m.L,m.S,undefined,cage); }
+        if(m.tick){ if(i===0) msg(`深度 ${D} cm：電腦正在搜尋排法…（已試 ${++nt} 種長度）`); }
         else if(m.done){ res.push(m.r); fin(); } };
       w.onerror=()=>{ failed++; res.push(null); fin(); };
       w.postMessage({st:snap,sol,D,base,live:i===0}); }); }); }
@@ -1105,7 +1106,7 @@ async function runSolver(){
   const depths=[SOL.D];
   const msg=t=>{$("solMsg").textContent=t;};
   for(const D of depths){ let last=0;
-    const live=(S,c)=>{ const now=performance.now(); if(now-last<120) return; last=now; applyLayout(D,c.L,S,undefined,SOL.cage&&D>80); };
+    const live=null, liveOld=(S,c)=>{ const now=performance.now(); if(now-last<120) return; last=now; applyLayout(D,c.L,S,undefined,SOL.cage&&D>80); };
     const pre0=preFor(base,D), cg=SOL.cage&&D>80; let r=null;
     if(!pre0) r=await solveParallel(D,base,msg,cg);   // 沒有類似的預存結果：多顆 CPU 同時算，取最短
     if(!r){ SOL.onFrame=live; r=await solveDepth(D,base,msg); SOL.onFrame=null;   // 有預存（含物品組合不同的類似結果）：以它當起點
@@ -1222,8 +1223,8 @@ loadPreset("a"); draw();
   const pre=preFor(base,136); if(!pre||pre.D!==136) return; setSolD(136); applyLayout(136,pre.L,pre.S,PRE.meta.rod,false); })();
 if(typeof WorkerGlobalScope!=="undefined"&&self instanceof WorkerGlobalScope){
   self.onmessage=async e=>{ const m=e.data; Object.assign(st,m.st); Object.assign(SOL,m.sol); SOL.running=false; SOL.onFrame=null;
-    if(m.live){ let last=0; SOL.onFrame=(S,c)=>{ const now=performance.now(); if(now-last<150) return; last=now; self.postMessage({frame:true,L:c.L,S}); }; }
-    const r=await solveDepth(m.D,m.base,()=>{},true); self.postMessage({done:true,r:{D:r.D,L:r.L,S:r.S,rod:r.rod,cage:r.cage,pre:r.pre}}); };
+    const rep=m.live?(()=>self.postMessage({tick:true})):(()=>{});
+    const r=await solveDepth(m.D,m.base,rep,true); self.postMessage({done:true,r:{D:r.D,L:r.L,S:r.S,rod:r.rod,cage:r.cage,pre:r.pre}}); };
 }
 })();
 </script>
