@@ -1008,7 +1008,7 @@ async function solveDepth(D,base,report,noPre){
   const tick=()=>new Promise(r=>setTimeout(r,0));
   const floorD=SOL.cage?Math.min(D,80):D; const acIx=base.filter(i=>i.key==="ac").map(i=>i.id); const area=base.reduce((a,it)=>{const b=fp(it); const skip=(it.key==="ac"&&acIx.indexOf(it.id)%2===1)||it.key==="jinlu"||HANG(it.key); return a+(b.z0<HEAD&&!skip?(b.x1-b.x0)*(b.y1-b.y0):0);},0);
   let lo=Math.max(st.DW+20,Math.floor(area/floorD/10)*10), hi=1000, bestL=null, bestS=null;
-  let r, usedPre=false; const pre=noPre?null:preFor(base,D); if(pre&&!pre.sim) SOL.onFrame=null;
+  let r, usedPre=false; const pre=noPre?null:preFor(base,D); if(pre) SOL.onFrame=null;
   if(pre){ report(`深度 ${D} cm：從預先算好的結果開始…`);
     for(let L=pre.L;L<=Math.min(hi,pre.L+(pre.sim?450:200))&&!usedPre;L+=(pre.sim?30:10)){ const c=depthCtx(L,D); const S=clone(pre.S); normalize(S,c);
       if(energy(S,c,true)===0){bestL=L;bestS=S;usedPre=true;break;}
@@ -1035,7 +1035,7 @@ async function solveDepth(D,base,report,noPre){
     if(r.E===0){bestL=L;bestS=r.best;miss=0;} else miss++;
   }
   if(bestS){ const cc=depthCtx(bestL,D); bestS=gasCloser(lowerRod(bestS,cc),cc); }
-  return {D,L:bestL,S:bestS,cage:SOL.cage&&D>80,rod:bestS?rodOf(bestS):null,pre:usedPre&&!(pre&&pre.sim)};
+  return {D,L:bestL,S:bestS,cage:SOL.cage&&D>80,rod:bestS?rodOf(bestS):null,pre:usedPre&&!(pre&&pre.sim),warm:usedPre};
 }
 // after a layout works: move each gas cylinder as close to its heater as the layout still allows
 function gasCloser(S,c){ let cur=clone(S);
@@ -1110,7 +1110,7 @@ async function runSolver(){
     if(!pre0) r=await solveParallel(D,base,msg,cg);   // 沒有類似的預存結果：多顆 CPU 同時算，取最短
     if(!r){ SOL.onFrame=live; r=await solveDepth(D,base,msg); SOL.onFrame=null;   // 有預存（含物品組合不同的類似結果）：以它當起點
       if(r.fail){ r=await solveParallel(D,base,msg,cg); if(!r){ SOL.onFrame=live; r=await solveDepth(D,base,msg,true); SOL.onFrame=null; } } }
-    if(r.L&&r.pre&&!r.cage) await playSolve(r,D,msg);
+    if(r.L&&r.warm&&!r.cage) await playSolve(r,D,msg,!r.pre);
     else if(r.L) applyLayout(r.D,r.L,r.S,r.rod,r.cage);
     SOL.res=SOL.res.filter(x=>!(x.D===r.D&&!!x.cage===!!r.cage)); SOL.res.push(r); SOL.res.sort((a,b)=>a.D-b.D); showRes(); }
   msg(`完成。結果是程式搜尋到的最短長度${SOL.res.some(r=>r.pre)?"（參考預先算好的配置並已重新驗證）":""}，可能還有更短的排法；點「看配置」可在上方圖中檢查與微調。`);
@@ -1124,10 +1124,10 @@ function applyLayout(D,L,S,rod,cage){
   const p=items.find(i=>i.id==="person"); if(p){p.x=st.DX; p.y=0;}
   draw();
 }
-async function playSolve(r,D,msg){
+async function playSolve(r,D,msg,fast){
   const sleep=ms=>new Promise(x=>setTimeout(x,ms)), sk=$("solSkip"); let skip=false; sk.style.display=""; sk.onclick=()=>{skip=true;};
-  const steps=[]; for(let L=Math.max(r.L+250,500);L>r.L;L-=5) steps.push(L);
-  const dt=Math.min(110,2500/steps.length), fr=2;
+  const steps=[]; for(let L=Math.max(r.L+(fast?150:250),fast?r.L+150:500);L>r.L;L-=5) steps.push(L);
+  const dt=Math.min(110,(fast?1500:2500)/steps.length), fr=2;
   for(const L of steps){ if(skip) break;
     msg(`深度 ${D} cm：試排 ${L} cm …`);
     const c=depthCtx(L,D), S0=clone(r.S);
