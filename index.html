@@ -981,7 +981,8 @@ async function anneal(base,c,iters,restarts,tick,seed){
       const T=T0*Math.pow(0.0005,k/iters), sig=Math.max(3,c.L*0.25*Math.pow(0.02,k/iters));
       const N=clone(S); mutate(N,c,sig); const e=energy(N,c,true);
       if(e<=E||Math.random()<Math.exp((E-e)/T)){S=N;E=e;}
-      if(E<bestE){bestE=E;best=clone(S); if(bestE===0) break;}
+      if(E<bestE){bestE=E;best=clone(S); if(bestE===0&&!(seed&&seed.noStop)) break;}
+      if(seed&&seed.onFrame&&k%seed.every===0) await seed.onFrame(S);
       if(k%400===0) await tick();
     }
   }
@@ -1091,14 +1092,17 @@ function applyLayout(D,L,S,rod,cage){
 }
 async function playSolve(r,D,msg){
   const sleep=ms=>new Promise(x=>setTimeout(x,ms)), sk=$("solSkip"); let skip=false; sk.style.display=""; sk.onclick=()=>{skip=true;};
-  const steps=[]; for(let L=Math.max(r.L+250,500);L>=r.L;L-=5) steps.push(L);
-  const dt=Math.min(110,3200/steps.length);
+  const steps=[]; for(let L=Math.max(r.L+250,500);L>r.L;L-=5) steps.push(L);
+  const dt=Math.min(110,2500/steps.length), fr=2;
   for(const L of steps){ if(skip) break;
     msg(`深度 ${D} cm：試排 ${L} cm …`);
-    if(L===r.L) applyLayout(D,L,r.S,r.rod,false);
-    else { const c=depthCtx(L,D), S=clone(r.S), k=L/r.L; for(const it of S){ const b=fp(it),w=b.x1-b.x0; it.x=(it.x+w/2)*k-w/2; } normalize(S,c); applyLayout(D,L,S,r.rod,false); }
-    await sleep(dt); }
-  for(const L of [r.L-5,r.L-10]){ if(skip) break; msg(`深度 ${D} cm：試排 ${L} cm … 放不下`); await sleep(350); }
+    const c=depthCtx(L,D), S0=clone(r.S);
+    // 以預存配置為底，在這個長度做一小段真的「亂動→冷卻」的試排，每幾步把當下的排法畫出來（越接近最短長度，動得越少）
+    const hot=60+(L-r.L)*3;
+    await anneal(S0,c,fr*120,1,()=>0,{S:S0,L:r.L,T0:hot,noStop:true,every:120,onFrame:async S=>{ if(skip) return; applyLayout(D,L,S,r.rod,false); await sleep(dt/fr); }});
+  }
+  msg(`深度 ${D} cm：試排 ${r.L} cm …`); applyLayout(D,r.L,r.S,r.rod,false); await sleep(300);
+  for(const L of [r.L-5,r.L-10]){ if(skip) break; msg(`深度 ${D} cm：試排 ${L} cm … 放不下`); await sleep(250); }
   applyLayout(D,r.L,r.S,r.rod,false); sk.style.display="none";
 }
 function showRes(){
