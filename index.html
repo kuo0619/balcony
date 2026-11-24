@@ -986,6 +986,7 @@ async function anneal(base,c,iters,restarts,tick,seed){
       if(e<=E||Math.random()<Math.exp((E-e)/T)){S=N;E=e;}
       if(E<bestE){bestE=E;best=clone(S); if(bestE===0&&!(seed&&seed.noStop)) break;}
       if(seed&&seed.onFrame&&k%seed.every===0) await seed.onFrame(S);
+      if(SOL.onFrame&&k%200===0) await SOL.onFrame(S,c);
       if(k%400===0) await tick();
     }
   }
@@ -1005,28 +1006,28 @@ async function solveDepth(D,base,report){
   const tick=()=>new Promise(r=>setTimeout(r,0));
   const floorD=SOL.cage?Math.min(D,80):D; const acIx=base.filter(i=>i.key==="ac").map(i=>i.id); const area=base.reduce((a,it)=>{const b=fp(it); const skip=(it.key==="ac"&&acIx.indexOf(it.id)%2===1)||it.key==="jinlu"||HANG(it.key); return a+(b.z0<HEAD&&!skip?(b.x1-b.x0)*(b.y1-b.y0):0);},0);
   let lo=Math.max(st.DW+20,Math.floor(area/floorD/10)*10), hi=1000, bestL=null, bestS=null;
-  let r, usedPre=false; const pre=preFor(base,D);
+  let r, usedPre=false; const pre=preFor(base,D); if(pre) SOL.onFrame=null;
   if(pre){ report(`深度 ${D} cm：從預先算好的結果開始…`);
     for(let L=pre.L;L<=Math.min(hi,pre.L+200)&&!usedPre;L+=10){ const c=depthCtx(L,D); const S=clone(pre.S); normalize(S,c);
       if(energy(S,c,true)===0){bestL=L;bestS=S;usedPre=true;break;}
       r=await anneal(base,c,6000,2,tick,{S:pre.S,L:pre.L,T0:200}); if(r.E===0){bestL=L;bestS=r.best;usedPre=true;} }
     if(usedPre) hi=bestL; }
   if(!usedPre){
-  report(`深度 ${D} cm：先試 ${hi} cm…`);
+  report(`深度 ${D} cm：試排 ${hi} cm …`);
   r=await anneal(base,depthCtx(hi,D),5000,3,tick);
   if(r.E>0) return {D,L:null};
   bestL=hi; bestS=r.best; }
   while(!usedPre&&hi-lo>10){
-    const mid=Math.round((lo+hi)/20)*10; report(`深度 ${D} cm：試 ${mid} cm（範圍 ${lo}～${hi}）`);
+    const mid=Math.round((lo+hi)/20)*10; report(`深度 ${D} cm：試排 ${mid} cm …`);
     r=await anneal(base,depthCtx(mid,D),12000,4,tick,{S:bestS,L:bestL});
-    if(r.E>0){ report(`深度 ${D} cm：${mid} cm 再試一次…`); r=await anneal(base,depthCtx(mid,D),20000,4,tick,{S:bestS,L:bestL}); }
+    if(r.E>0){ report(`深度 ${D} cm：試排 ${mid} cm …`); r=await anneal(base,depthCtx(mid,D),20000,4,tick,{S:bestS,L:bestL}); }
     if(r.E===0){hi=mid;bestL=mid;bestS=r.best;} else lo=mid;
   }
   // refine downward from the best length, warm-started, until two misses in a row
   let miss=0;
   const missMax=usedPre&&pre.exact?1:2;
   for(let L=bestL-10;L>=Math.max(st.DW+20,40)&&miss<missMax;L-=10){
-    report(`深度 ${D} cm：再往下試 ${L} cm…`);
+    report(`深度 ${D} cm：試排 ${L} cm …`);
     r=await anneal(base,depthCtx(L,D),usedPre?12000:20000,usedPre?3:4,tick,{S:bestS,L:bestL,T0:usedPre?300:3000});
     if(r.E===0){bestL=L;bestS=r.best;miss=0;} else miss++;
   }
@@ -1072,17 +1073,42 @@ async function planPreset(k){
   msg(nb+nw===0?`${P.name}：排好了，所有物品都放得下、拿得到。${rodTxt}`:`${P.name}：在這個尺寸內找不到完全沒問題的排法，下面是問題最少的結果（${nb} 個衝突、${nw} 個提醒）。${rodTxt}`);
   SOL.running=false; btns.forEach(b=>b.disabled=false); $("solGo").disabled=false;
 }
+// ---- 多核心：把整個頁面的程式放進幾個背景工作者（Web Worker），各自獨立亂擺，最後取最短的
+function getPool(){ if(SOL.pool!==undefined) return SOL.pool;
+  try{ const src=[...document.scripts].reduce((a,x)=>x.textContent.length>a.length?x.textContent:a,"");
+    const pre='(()=>{const d=new Proxy(function(){},{get:(t,p)=>p===Symbol.toPrimitive?(()=>""):p==="then"?undefined:d,apply:()=>d,construct:()=>d,set:()=>true});self.document=d;self.window=self;self.localStorage=d;self.innerWidth=1500;self.requestAnimationFrame=()=>0;})();\n';
+    const url=URL.createObjectURL(new Blob([pre+src],{type:"text/javascript"}));
+    const N=Math.max(2,Math.min(4,(navigator.hardwareConcurrency||4)-1)); SOL.pool=Array.from({length:N},()=>new Worker(url));
+  }catch(e){ SOL.pool=null; }
+  return SOL.pool; }
+function solveParallel(D,base,msg,cage){
+  const pool=getPool(); if(!pool) return Promise.resolve(null);
+  const snap=JSON.parse(JSON.stringify(st)), sol={cage:SOL.cage,rodFree:SOL.rodFree,stack:SOL.stack,bike:SOL.bike,jin:SOL.jin};
+  return new Promise(resolve=>{ const res=[]; let left=pool.length, failed=0, over=false;
+    const fin=()=>{ if(--left>0||over) return; over=true; clearTimeout(wd); const ok=res.filter(Boolean);
+      if(!ok.length) return resolve(failed===pool.length?null:{D,L:null});
+      const w=ok.filter(r=>r.L); resolve(w.length?w.reduce((a,b)=>b.L<a.L?b:a):{D,L:null}); };
+    const wd=setTimeout(()=>{ if(over) return; over=true; SOL.pool=undefined; pool.forEach(w=>w.terminate()); resolve(null); },240000);
+    pool.forEach((w,i)=>{
+      w.onmessage=e=>{ const m=e.data; if(over) return;
+        if(m.frame){ msg(`深度 ${D} cm：試排 ${m.L} cm …`); applyLayout(D,m.L,m.S,undefined,cage); }
+        else if(m.done){ res.push(m.r); fin(); } };
+      w.onerror=()=>{ failed++; res.push(null); fin(); };
+      w.postMessage({st:snap,sol,D,base,live:i===0}); }); }); }
 async function runSolver(){
   if(SOL.running) return; SOL.running=true; $("solGo").disabled=true; SOL.res=[];
   const base=clone(items.filter(i=>i.on&&i.kind!=="ref"));
   for(const it of base){ if(it.key==="bike"&&!it.posture) it.posture="flat"; }
   const depths=[SOL.D];
   const msg=t=>{$("solMsg").textContent=t;};
-  for(const D of depths){ let r=await solveDepth(D,base,msg);
+  for(const D of depths){ let last=0;
+    const live=(S,c)=>{ const now=performance.now(); if(now-last<120) return; last=now; applyLayout(D,c.L,S,undefined,SOL.cage&&D>80); };
+    let r=null; if(!preFor(base,D)) r=await solveParallel(D,base,msg,SOL.cage&&D>80);   // 多顆 CPU 同時算，取最短
+    if(!r){ SOL.onFrame=live; r=await solveDepth(D,base,msg); SOL.onFrame=null; }
     if(r.L&&r.pre&&!r.cage) await playSolve(r,D,msg);
-    if(r.L&&!r.pre){ const r2=await solveDepth(D,base,t=>msg(t+"（第二輪）")); if(r2.L&&r2.L<r.L) r=r2; }
+    else if(r.L) applyLayout(r.D,r.L,r.S,r.rod,r.cage);
     SOL.res=SOL.res.filter(x=>!(x.D===r.D&&!!x.cage===!!r.cage)); SOL.res.push(r); SOL.res.sort((a,b)=>a.D-b.D); showRes(); }
-  msg(`完成。結果是程式搜尋到的最短長度（參考預先算好的配置並已重新驗證），可能還有更短的排法；點「看配置」可在上方圖中檢查與微調。`);
+  msg(`完成。結果是程式搜尋到的最短長度${SOL.res.some(r=>r.pre)?"（參考預先算好的配置並已重新驗證）":""}，可能還有更短的排法；點「看配置」可在上方圖中檢查與微調。`);
   SOL.running=false; $("solGo").disabled=false;
 }
 // 預存結果時，用動畫把「電腦逐步試排、長度一路縮短」演出來（每一格都是真的重新排好再畫）
@@ -1189,6 +1215,11 @@ loadPreset("a"); draw();
 // 第一次打開：直接顯示深 136 cm、已排好的配置（預存結果）
 (function(){ const base=clone(items.filter(i=>i.on&&i.kind!=="ref")); for(const it of base){ if(it.key==="bike"&&!it.posture) it.posture="flat"; }
   const pre=preFor(base,136); if(!pre||pre.D!==136) return; setSolD(136); applyLayout(136,pre.L,pre.S,PRE.meta.rod,false); })();
+if(typeof WorkerGlobalScope!=="undefined"&&self instanceof WorkerGlobalScope){
+  self.onmessage=async e=>{ const m=e.data; Object.assign(st,m.st); Object.assign(SOL,m.sol); SOL.running=false; SOL.onFrame=null;
+    if(m.live){ let last=0; SOL.onFrame=(S,c)=>{ const now=performance.now(); if(now-last<150) return; last=now; self.postMessage({frame:true,L:c.L,S}); }; }
+    const r=await solveDepth(m.D,m.base,()=>{}); self.postMessage({done:true,r:{D:r.D,L:r.L,S:r.S,rod:r.rod,cage:r.cage,pre:r.pre}}); };
+}
 })();
 </script>
 </body></html>
