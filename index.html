@@ -827,12 +827,15 @@ function segs(){
 function fontSizes(){
   const pw=$("plan").getBoundingClientRect().width||900, ew=$("elev").getBoundingClientRect().width||900;
   const Dm=st.D+(st.ext?st.E:0), pair=$("pair"), PADX=30, GAP=14;
-  if(innerWidth>820){const tot=pair.getBoundingClientRect().width-GAP-2*PADX, ve=st.L+120, vs=Dm+130, k=tot/(ve+vs);
-    pair.style.gridTemplateColumns=`${ve*k+PADX}px ${vs*k+PADX}px`;} else pair.style.gridTemplateColumns="";
   fsP=12*(st.L+120)/pw; fsE=12*(st.L+120)/ew; const sw=$("side").getBoundingClientRect().width||300; fsS=12*(Dm+110)/sw;
 }
-let raf=0;
-function draw(){ if(raf) return; raf=requestAnimationFrame(()=>{raf=0; enforce(); fontSizes(); const ck=check(); planSVG(ck); elevSVG(ck); sideSVG(ck); panels(ck); segs();}); }
+let raf=0, retry=0;
+// 立面圖與剖面圖用同一個比例（每公分同樣大），樓板高度才會對齊
+function alignPair(){ const pair=$("pair"); if(innerWidth<=820){pair.style.gridTemplateColumns="";return;}
+  const ve=$("elev").viewBox.baseVal.width, vs=$("side").viewBox.baseVal.width, PADX=30, GAP=14;
+  const tot=pair.getBoundingClientRect().width-GAP-2*PADX, k=tot/(ve+vs); pair.style.gridTemplateColumns=`${ve*k+PADX}px ${vs*k+PADX}px`; }
+function draw(){ if(raf) return; raf=requestAnimationFrame(()=>{raf=0; enforce(); alignPair(); fontSizes(); const ck=check(); planSVG(ck); elevSVG(ck); sideSVG(ck); alignPair(); panels(ck); segs();
+  const ew=$("elev").getBoundingClientRect().width; if(ew>0&&Math.abs(12*(st.L+120)/ew-fsE)>0.4&&retry++<3) draw(); else retry=0;}); }
 
 $("presets").innerHTML=Object.entries(PRESETS).map(([k,p])=>`<div class="prow"><button type="button" class="btn" data-k="${k}">${p.name}<small>${p.sub}</small></button><button type="button" class="btn plan" data-plan="${k}">計算規劃</button></div>`).join("");
 $("presets").addEventListener("click",e=>{const pb=e.target.closest("button[data-plan]"); if(pb){planPreset(pb.dataset.plan); return;} const b=e.target.closest("button[data-k]"); if(!b) return; loadPreset(b.dataset.k); st.sel=null; draw();});
@@ -1173,16 +1176,19 @@ window.addEventListener("resize",draw);
 // ---------- collapsible panels
 (function(){
   const heads=[...document.querySelectorAll(".grp>.gh,.sheet>h2")];
-  let saved={}; try{saved=JSON.parse(localStorage.getItem("blc-collapsed")||"{}");}catch(e){}
+  let saved={g2:true,g3:true,g4:true,g7:true}; try{const t=localStorage.getItem("blc-collapsed2"); if(t) saved=JSON.parse(t);}catch(e){}
   heads.forEach((h,i)=>{const box=h.parentElement, key=box.id||h.id||("h"+i);
     h.setAttribute("role","button"); h.tabIndex=0;
-    const set=v=>{box.classList.toggle("collapsed",v); h.setAttribute("aria-expanded",!v); saved[key]=v; try{localStorage.setItem("blc-collapsed",JSON.stringify(saved));}catch(e){} draw();};
+    const set=v=>{box.classList.toggle("collapsed",v); h.setAttribute("aria-expanded",!v); saved[key]=v; try{localStorage.setItem("blc-collapsed2",JSON.stringify(saved));}catch(e){} draw();};
     if(saved[key]) {box.classList.add("collapsed"); h.setAttribute("aria-expanded","false");} else h.setAttribute("aria-expanded","true");
     h.addEventListener("click",()=>set(!box.classList.contains("collapsed")));
     h.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault(); set(!box.classList.contains("collapsed"));}});
   });
 })();
 loadPreset("a"); draw();
+// 第一次打開：直接顯示深 136 cm、已排好的配置（預存結果）
+(function(){ const base=clone(items.filter(i=>i.on&&i.kind!=="ref")); for(const it of base){ if(it.key==="bike"&&!it.posture) it.posture="flat"; }
+  const pre=preFor(base,136); if(!pre||pre.D!==136) return; setSolD(136); applyLayout(136,pre.L,pre.S,PRE.meta.rod,false); })();
 })();
 </script>
 </body></html>
